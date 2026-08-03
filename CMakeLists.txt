@@ -33,6 +33,13 @@ if(EXISTS "${CREATION_SUITE_SHARED_DIR}/AssetSystem/CMakeLists.txt")
     set(CREATION_MODELER_ASSET_SYSTEM_TARGET creation_suite_asset_system)
 endif()
 
+set(CREATION_MODELER_VFS_TARGET "")
+if(EXISTS "${CREATION_SUITE_SHARED_DIR}/VFS/CMakeLists.txt")
+    add_subdirectory("${CREATION_SUITE_SHARED_DIR}/VFS"
+                     "${CMAKE_CURRENT_BINARY_DIR}/CreationSuiteSharedVFS")
+    set(CREATION_MODELER_VFS_TARGET creation_suite_vfs)
+endif()
+
 set(CREATION_MODELER_SERVICES_TARGET "")
 if(EXISTS "${CREATION_SUITE_SHARED_DIR}/Services/CMakeLists.txt")
     add_subdirectory("${CREATION_SUITE_SHARED_DIR}/Services"
@@ -58,6 +65,16 @@ juce_add_gui_app(CreationModelerApp
     PRODUCT_NAME "Creation Modeler"
     COMPANY_NAME "LagDaemon Software"
     BUNDLE_ID "com.lagdaemon.creationmodeler"
+)
+
+# Mirrors the built executable into the workspace-level shared bin
+# directory (D:\CreationSuite-Workspaces\claude-<config>-bin) so it's
+# reachable at a stable path without needing OS symlink privileges.
+# Every suite agent does this for its own repo -- see AGENTS.md.
+add_custom_command(TARGET CreationModelerApp POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory "D:/CreationSuite-Workspaces/claude-$<LOWER_CASE:$<CONFIG>>-bin"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:CreationModelerApp>" "D:/CreationSuite-Workspaces/claude-$<LOWER_CASE:$<CONFIG>>-bin/"
+    COMMENT "Copying CreationModelerApp to the shared claude bin directory"
 )
 
 juce_generate_juce_header(CreationModelerApp)
