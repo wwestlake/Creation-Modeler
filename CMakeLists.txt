@@ -65,6 +65,8 @@ juce_add_gui_app(CreationModelerApp
     PRODUCT_NAME "Creation Modeler"
     COMPANY_NAME "LagDaemon Software"
     BUNDLE_ID "com.lagdaemon.creationmodeler"
+    ICON_BIG "${CREATION_SUITE_SHARED_DIR}/UI/assets/creation_modeler.png"
+    ICON_SMALL "${CREATION_SUITE_SHARED_DIR}/UI/assets/creation_modeler.png"
 )
 
 # Mirrors the built executable into the workspace-level shared bin
