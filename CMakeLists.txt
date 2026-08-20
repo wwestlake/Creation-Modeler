@@ -7,15 +7,14 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+include("${CMAKE_CURRENT_SOURCE_DIR}/../../shared/CMake/CreationSuiteBuildSettings.cmake")
+creation_suite_require_juce()
+
 if(MSVC)
     string(APPEND CMAKE_CXX_FLAGS_RELEASE " /Zi")
     string(APPEND CMAKE_EXE_LINKER_FLAGS_RELEASE " /DEBUG /OPT:REF /OPT:ICF")
     string(APPEND CMAKE_SHARED_LINKER_FLAGS_RELEASE " /DEBUG /OPT:REF /OPT:ICF")
     string(APPEND CMAKE_MODULE_LINKER_FLAGS_RELEASE " /DEBUG /OPT:REF /OPT:ICF")
-endif()
-
-if(NOT DEFINED JUCE_DIR)
-    message(FATAL_ERROR "Set JUCE_DIR to your JUCE root directory before configuring.")
 endif()
 
 set(CREATION_SUITE_SHARED_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../shared" CACHE PATH "Path to the Creation Suite shared code root")
@@ -25,6 +24,13 @@ configure_creation_shared_llvm(CREATION_MODELER "Creation Modeler")
 
 add_subdirectory("${JUCE_DIR}" juce)
 add_subdirectory(Language)
+
+set(CREATION_MODELER_VFS_TARGET "")
+if(EXISTS "${CREATION_SUITE_SHARED_DIR}/VFS/CMakeLists.txt")
+    add_subdirectory("${CREATION_SUITE_SHARED_DIR}/VFS"
+                     "${CMAKE_CURRENT_BINARY_DIR}/CreationSuiteSharedVFS")
+    set(CREATION_MODELER_VFS_TARGET creation_suite_vfs)
+endif()
 
 set(CREATION_MODELER_ASSET_SYSTEM_TARGET "")
 if(EXISTS "${CREATION_SUITE_SHARED_DIR}/AssetSystem/CMakeLists.txt")
@@ -58,7 +64,11 @@ juce_add_gui_app(CreationModelerApp
     PRODUCT_NAME "Creation Modeler"
     COMPANY_NAME "LagDaemon Software"
     BUNDLE_ID "com.lagdaemon.creationmodeler"
+    ICON_BIG "${CMAKE_CURRENT_SOURCE_DIR}/../../shared/UI/assets/creation_modeler.png"
+    ICON_SMALL "${CMAKE_CURRENT_SOURCE_DIR}/../../shared/UI/assets/creation_modeler.png"
 )
+
+creation_suite_add_shared_bin_copy(CreationModelerApp)
 
 juce_generate_juce_header(CreationModelerApp)
 
@@ -79,6 +89,7 @@ target_compile_definitions(CreationModelerApp PRIVATE
 )
 
 target_link_libraries(CreationModelerApp PRIVATE
+    ${CREATION_MODELER_VFS_TARGET}
     ${CREATION_MODELER_ASSET_SYSTEM_TARGET}
     ${CREATION_MODELER_SERVICES_TARGET}
     ${CREATION_MODELER_UI_TARGET}

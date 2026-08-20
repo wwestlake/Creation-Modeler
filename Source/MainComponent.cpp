@@ -183,9 +183,8 @@ juce::String MainComponent::configSummaryText() const
     juce::String text;
     text << "Suite config directory: " << configDirectory << "\n";
     text << "Project container root: " << containersDirectory << "\n";
-    text << "Suite VFS root: " << suiteSettings.suiteVfsRoot << "\n";
-    text << "Shared resources root: " << suiteSettings.sharedResourcesRoot << "\n";
-    text << "Exports root: " << suiteSettings.exportsRoot << "\n\n";
+    text << "Suite VFS root: " << suiteSettings.suiteVfsRoot << "\n\n";
+    text << "All app settings and project data are expected to flow through the suite VFS service.\n";
     text << "Use the suite gear button to manage shared settings without rebuilding this app-specific shell.";
     return text;
 }
