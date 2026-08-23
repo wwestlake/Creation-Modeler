@@ -16,18 +16,6 @@ jobs:
         working-directory: apps/CreationModeler
 
     steps:
-      # Modeler's own CMake (both the CreationSharedLLVM.cmake include and
-      # the CREATION_SUITE_SHARED_DIR default) resolves everything shared/
-      # as ../../shared relative to itself -- its real layout as an
-      # apps/CreationModeler submodule inside the Creation-Suite umbrella
-      # repo. Rather than overriding each of those relative paths
-      # individually (fragile -- a plain override missed the hardcoded
-      # ../../shared/CMake/CreationSharedLLVM.cmake include entirely), CI
-      # just reproduces the real nesting: check out the umbrella first for
-      # its shared/ tree, then check out this app's own tagged commit into
-      # apps/CreationModeler, overwriting the umbrella's empty submodule
-      # placeholder. Every relative path then resolves exactly as it does
-      # in a real Creation-Suite checkout.
       - name: Checkout Creation Suite umbrella (for shared/)
         uses: actions/checkout@v4
         with:
@@ -48,8 +36,8 @@ jobs:
         shell: pwsh
         run: |
           # shared/CEL's grammar generation needs win_bison.exe/win_flex.exe.
-          # This app only links ce_lang_frontend/node_system (no JIT), so
-          # this is the only extra tooling it needs -- no LLVM concerns.
+          # If this step is ever skipped, CelGrammar.cmake falls back to the
+          # checked-in generated sources with a warning rather than failing.
           $release = Invoke-RestMethod -Uri "https://api.github.com/repos/lexxmark/winflexbison/releases/latest"
           $asset = $release.assets | Where-Object { $_.name -like "*win_flex_bison*.zip" } | Select-Object -First 1
           if (-not $asset) {
@@ -68,12 +56,14 @@ jobs:
         run: |
           $tag = $env:GITHUB_REF_NAME
 
-          if ($tag -notmatch '^creation-modeler-v(?<version>\d+\.\d+\.\d+)(?:-(?<channel>[0-9A-Za-z.-]+))?$') {
+          if ($tag -match '^creation-modeler-v(?<version>\d+\.\d+\.\d+)(?:-(?<channel>[0-9A-Za-z.-]+))?$') {
+            $versionText = $Matches.version
+            $explicitChannel = $Matches.channel
+          }
+          else {
             throw "Tag '$tag' must start with creation-modeler-v."
           }
 
-          $versionText = $Matches.version
-          $explicitChannel = $Matches.channel
           $channel = "stable"
           $prerelease = "false"
 
@@ -90,7 +80,7 @@ jobs:
               $channel = "alpha"
               $prerelease = "true"
             }
-            elseif ($major -eq 0 -and $minor -ge 5) {
+            elseif ($major -eq 0) {
               $channel = "beta"
               $prerelease = "true"
             }
@@ -103,14 +93,13 @@ jobs:
 
           Add-Content -Path $env:GITHUB_OUTPUT -Value "tag=$tag"
           Add-Content -Path $env:GITHUB_OUTPUT -Value "version=$versionText"
-          Add-Content -Path $env:GITHUB_OUTPUT -Value "channel=$channel"
           Add-Content -Path $env:GITHUB_OUTPUT -Value "prerelease=$prerelease"
           Add-Content -Path $env:GITHUB_OUTPUT -Value "suffix=$suffix"
 
       - name: Configure CMake
         shell: pwsh
         run: |
-          cmake -S . -B build -A x64 -DCMAKE_BUILD_TYPE=Release -DJUCE_DIR="$env:RUNNER_TEMP\JUCE" "-DCreationModeler_VERSION=${{ steps.classify.outputs.version }}"
+          cmake -S . -B build -A x64 -DCMAKE_BUILD_TYPE=Release -DJUCE_DIR="$env:RUNNER_TEMP\JUCE" -DCE_WINFLEXBISON_DIR="C:\tools\winflexbison" "-DCreationModeler_VERSION=${{ steps.classify.outputs.version }}"
 
       - name: Build app
         shell: pwsh
@@ -126,14 +115,17 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path artifacts | Out-Null
-          $installRoot = Join-Path $PWD "artifacts\stage\creation-modeler"
+          $stageRoot = Join-Path $PWD "artifacts\stage"
+          New-Item -ItemType Directory -Force -Path $stageRoot | Out-Null
+
+          $installRoot = Join-Path $stageRoot "creation-modeler"
           New-Item -ItemType Directory -Force -Path $installRoot | Out-Null
 
           cmake --install build --config Release --prefix $installRoot
 
           $exe = Get-ChildItem $installRoot -Recurse -File | Where-Object { $_.Extension -eq '.exe' } | Select-Object -First 1
           if (-not $exe) {
-            throw "Could not find the packaged Creation Modeler executable."
+            throw "Could not find the packaged executable for Creation Modeler."
           }
 
           $zipName = Join-Path $PWD ("artifacts\{0}.zip" -f "${{ steps.classify.outputs.tag }}")
@@ -141,7 +133,7 @@ jobs:
             Remove-Item $zipName -Force
           }
 
-          Compress-Archive -Path (Join-Path $installRoot "*") -DestinationPath $zipName -Force
+          Compress-Archive -Path (Join-Path $stageRoot "creation-modeler\*") -DestinationPath $zipName -Force
 
       - name: Build MSI installer
         shell: pwsh
@@ -169,7 +161,7 @@ jobs:
 
           $msi = Get-ChildItem $PWD -Recurse -File -Filter *.msi | Select-Object -First 1
           if (-not $msi) {
-            throw "Could not find the packaged Creation Modeler MSI."
+            throw "Could not find the packaged MSI for Creation Modeler."
           }
 
           $msiName = Join-Path $PWD ("artifacts\{0}.msi" -f "${{ steps.classify.outputs.tag }}")
