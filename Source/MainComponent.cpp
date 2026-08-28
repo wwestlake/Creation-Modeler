@@ -1,4 +1,6 @@
-﻿#include "MainComponent.h"
+#include "MainComponent.h"
+
+#include <thread>
 
 #include "Branding.h"
 #include "../Language/AppLanguagePolicy.h"
@@ -16,13 +18,90 @@ void configureSummaryBox(juce::TextEditor& editor)
     editor.setColour(juce::TextEditor::outlineColourId, juce::Colour(0xff314155));
     editor.setColour(juce::TextEditor::textColourId, juce::Colours::white);
 }
+
+// Wraps an existing component (not owned) as a dock panel's content, filling
+// whatever bounds the dock zone/tab gives it.
+class NonOwningPanelHost final : public juce::Component
+{
+public:
+    explicit NonOwningPanelHost(juce::Component& contentToHost) : content(contentToHost)
+    {
+        addAndMakeVisible(content);
+    }
+
+    void resized() override
+    {
+        content.setBounds(getLocalBounds());
+    }
+
+private:
+    juce::Component& content;
+};
+
+// The GroupComponent + its TextEditor summary are siblings positioned by hand
+// in MainComponent::resized() today, not a real parent/child pair -- this
+// reparents the summary into the group and gives the pair one dockable
+// bounds-owner instead of two independently-positioned components.
+class GroupSummaryHost final : public juce::Component
+{
+public:
+    GroupSummaryHost(juce::GroupComponent& groupToHost, juce::TextEditor& summaryToHost)
+        : group(groupToHost), summary(summaryToHost)
+    {
+        addAndMakeVisible(group);
+        addAndMakeVisible(summary);
+    }
+
+    void resized() override
+    {
+        group.setBounds(getLocalBounds());
+        summary.setBounds(getLocalBounds().reduced(14, 26));
+    }
+
+private:
+    juce::GroupComponent& group;
+    juce::TextEditor& summary;
+};
+
+const juce::String panelIdWorkbench = "workbench";
+const juce::String panelIdResources = "resources";
+const juce::String panelIdConfig = "config";
+const juce::String panelIdAi = "ai";
+
+constexpr int menuIdPanelWorkbench = 3001;
+constexpr int menuIdPanelResources = 3002;
+constexpr int menuIdPanelConfig = 3003;
+constexpr int menuIdPanelAi = 3004;
+constexpr int menuIdResetLayout = 3005;
 }
 
 MainComponent::MainComponent()
 {
     configureHeader();
     configurePanels();
+    configureAiPanel();
     loadSuiteState();
+    processRegistration.RegisterSelf("modeler");
+
+    menuBar = std::make_unique<juce::MenuBarComponent>(static_cast<juce::MenuBarModel*>(this));
+    // Nothing in this app sets a suite-wide dark LookAndFeel, so MenuBarComponent
+    // falls back to LookAndFeel_V4::drawMenuBarItem/drawMenuBarBackground, which key
+    // off TextButton colour ids (not PopupMenu's) -- the default scheme renders dark
+    // text on a dark bar, invisible against this app's dark theme without this.
+    menuBar->setColour(juce::TextButton::buttonColourId, juce::Colour(0xff1c2230));
+    menuBar->setColour(juce::TextButton::buttonOnColourId, juce::Colour(0xff2a3244));
+    menuBar->setColour(juce::TextButton::textColourOffId, juce::Colours::white);
+    menuBar->setColour(juce::TextButton::textColourOnId, juce::Colours::white);
+    addAndMakeVisible(*menuBar);
+
+    dockManager = std::make_unique<CreationDock::DockManager>(*this);
+    addAndMakeVisible(*dockManager);
+    initialiseDockingWorkspace();
+    // setSize() below fires resized() immediately; menuBar/dockManager must already
+    // exist and be registered before that happens, or they're silently left at zero
+    // bounds (addAndMakeVisible alone doesn't trigger a layout pass).
+    resized();
+
     setSize(1380, 860);
 }
 MainComponent::~MainComponent() = default;
@@ -57,6 +136,11 @@ void MainComponent::configureHeader()
                                         loadSuiteState();
                                 });
 
+    suiteShellController.onProjectOpenRequested = [this](const juce::String& projectId)
+    {
+        openProject(projectId);
+    };
+
     addAndMakeVisible(headerBar);
 }
 
@@ -78,23 +162,128 @@ void MainComponent::configurePanels()
 
     workbenchGroup.setText("Domain Workbench");
     resourcesGroup.setText("Resources And Registry");
-    aiGroup.setText("AI Agent Shell");
     configGroup.setText("Suite Configuration");
-
-    addAndMakeVisible(workbenchGroup);
-    addAndMakeVisible(resourcesGroup);
-    addAndMakeVisible(aiGroup);
-    addAndMakeVisible(configGroup);
 
     configureSummaryBox(workbenchSummary);
     configureSummaryBox(resourcesSummary);
-    configureSummaryBox(aiSummary);
     configureSummaryBox(configSummary);
 
-    addAndMakeVisible(workbenchSummary);
-    addAndMakeVisible(resourcesSummary);
-    addAndMakeVisible(aiSummary);
-    addAndMakeVisible(configSummary);
+    // Reparented into dock panels (see initialiseDockingWorkspace) rather than
+    // added directly as MainComponent children -- no addAndMakeVisible here.
+}
+
+void MainComponent::configureAiPanel()
+{
+    // Reparented into a dock panel (see initialiseDockingWorkspace), not added
+    // directly here.
+
+    aiPanel.onAccountChanged = [this](const juce::String& accountId)
+    {
+        if (const auto* account = creation::services::SuiteAiSettingsResolver::findAccountById(suiteAiSettings, accountId))
+        {
+            resolvedAiSettings.accountId = account->accountId;
+            resolvedAiSettings.providerId = account->providerId;
+            resolvedAiSettings.baseUrl = account->baseUrl;
+            resolvedAiSettings.modelName = account->modelName;
+            resolvedAiSettings.apiKey = account->apiKey;
+            aiPanel.setSelectedModel(resolvedAiSettings.modelName);
+        }
+    };
+
+    aiPanel.onModelChanged = [this](const juce::String& modelName)
+    {
+        resolvedAiSettings.modelName = modelName.trim();
+    };
+
+    aiPanel.onPromptSubmitted = [this](const juce::String& submittedPrompt)
+    {
+        pendingAiPrompt = submittedPrompt;
+
+        creation::services::SuiteContextRetrievalRequest request;
+        request.prompt = submittedPrompt;
+        request.appDomain = juce::String(creation_modeler::language::getAppDomainName());
+        request.maxItems = 6;
+        request.processInstruction.steeringNote = aiPanel.getSteeringNote();
+
+        contextEngine.SubmitRequest(request);
+        headerBar.setStatusText("Building AI context packet...");
+    };
+
+    aiPanel.onCollapsedChanged = [this](bool)
+    {
+        resized();
+    };
+
+    contextEngine.onContextReady = [this](const creation::services::SuiteContextPacket& packet)
+    {
+        juce::MessageManager::callAsync([this, packet]
+        {
+            aiPanel.setContextPacket(packet);
+            if (pendingAiPrompt.isNotEmpty() && ! aiCompletionInFlight)
+                launchAiCompletion(packet);
+        });
+    };
+}
+
+void MainComponent::launchAiCompletion(const creation::services::SuiteContextPacket& packet)
+{
+    if (aiCompletionInFlight)
+        return;
+
+    if (! resolvedAiSettings.isValid() || resolvedAiSettings.apiKey.isEmpty())
+    {
+        aiPanel.setAssistantResponse("Configure an AI account in Suite Settings first.");
+        headerBar.setStatusText("No usable AI account configured.");
+        return;
+    }
+
+    if (pendingAiPrompt.trim().isEmpty())
+        return;
+
+    aiCompletionInFlight = true;
+    aiPanel.clearSteeringNote();
+
+    auto userPrompt = pendingAiPrompt;
+    juce::String contextBlock;
+    if (! packet.snippets.isEmpty())
+    {
+        contextBlock << "Project context (use only if directly relevant to the request below):\n";
+        for (const auto& snippet : packet.snippets)
+            contextBlock << "- " << snippet.title << " (" << snippet.category << "): " << snippet.excerpt << "\n";
+        contextBlock << "\n";
+    }
+    userPrompt = contextBlock + userPrompt;
+
+    std::thread([safeThis = juce::Component::SafePointer<MainComponent>(this),
+                 settings = resolvedAiSettings,
+                 userPrompt = std::move(userPrompt)]() mutable
+    {
+        if (safeThis == nullptr)
+            return;
+
+        creation::services::SuiteAiChatClient::ChatResult result;
+        auto ok = safeThis->aiChatClient.sendChatCompletion(settings, juce::String(), userPrompt, result);
+
+        juce::MessageManager::callAsync([safeThis, ok, result = std::move(result)]() mutable
+        {
+            if (safeThis == nullptr)
+                return;
+
+            safeThis->aiCompletionInFlight = false;
+            safeThis->pendingAiPrompt.clear();
+
+            if (ok)
+            {
+                safeThis->aiPanel.setAssistantResponse(result.text);
+                safeThis->headerBar.setStatusText("AI response received.");
+            }
+            else
+            {
+                safeThis->aiPanel.setAssistantResponse(result.errorMessage);
+                safeThis->headerBar.setStatusText("AI request failed: " + result.errorMessage);
+            }
+        });
+    }).detach();
 }
 
 void MainComponent::loadSuiteState()
@@ -104,6 +293,10 @@ void MainComponent::loadSuiteState()
 
     juce::String aiError;
     suiteAiSettings = suiteAiSettingsStore.load(aiError);
+    resolvedAiSettings = creation::services::SuiteAiSettingsResolver::resolveRuntimeSettingsForApp(suiteAiSettings, currentDomain());
+    aiPanel.RefreshConfiguredAccounts();
+    aiPanel.setSelectedAccountId(resolvedAiSettings.accountId);
+    aiPanel.setSelectedModel(resolvedAiSettings.modelName);
 
     juce::String registryError;
     const auto allProjects = creation::interop::ProjectRegistry::discoverProjects(suiteSettings, registryError);
@@ -127,11 +320,24 @@ void MainComponent::loadSuiteState()
     refreshShellSummary();
 }
 
+void MainComponent::openProject(const juce::String& projectId)
+{
+    juce::String errorMessage;
+    if (! creation::assets::ProjectWorkspaceService::openProject(suiteSettings, projectId, projectSession, errorMessage))
+    {
+        headerBar.setStatusText("Could not open project: " + errorMessage);
+        return;
+    }
+
+    headerBar.setProjectLabel("Project: " + projectSession.getManifest().projectName);
+    headerBar.setStatusText("Opened project: " + projectSession.getManifest().projectName);
+    loadSuiteState();
+}
+
 void MainComponent::refreshShellSummary()
 {
     workbenchSummary.setText(workbenchSummaryText(), juce::dontSendNotification);
     resourcesSummary.setText(registrySummaryText(), juce::dontSendNotification);
-    aiSummary.setText(aiSummaryText(), juce::dontSendNotification);
     configSummary.setText(configSummaryText(), juce::dontSendNotification);
 }
 
@@ -160,21 +366,6 @@ juce::String MainComponent::registrySummaryText() const
     return text;
 }
 
-juce::String MainComponent::aiSummaryText() const
-{
-    const auto runtime = creation::services::SuiteAiSettingsResolver::resolveRuntimeSettingsForApp(suiteAiSettings,
-                                                                                                    currentDomain());
-
-    juce::String text;
-    text << "Shared AI account entries: " << suiteAiSettings.accounts.size() << "\n";
-    text << "Selected app domain token: " << juce::String(creation_modeler::language::getAppDomainName()) << "\n";
-    text << "Resolved provider: " << runtime.providerDisplayName << "\n";
-    text << "Resolved model: " << runtime.modelName << "\n";
-    text << "Resolved base URL: " << runtime.baseUrl << "\n\n";
-    text << "This shell is where app-specific agents, prompts, and task orchestration should sit on top of suite-wide provider selection.";
-    return text;
-}
-
 juce::String MainComponent::configSummaryText() const
 {
     const auto configDirectory = suiteSettingsStore.getSuiteConfigDirectory().getFullPathName();
@@ -183,9 +374,7 @@ juce::String MainComponent::configSummaryText() const
     juce::String text;
     text << "Suite config directory: " << configDirectory << "\n";
     text << "Project container root: " << containersDirectory << "\n";
-    text << "Suite VFS root: " << suiteSettings.suiteVfsRoot << "\n";
-    text << "Shared resources root: " << suiteSettings.sharedResourcesRoot << "\n";
-    text << "Exports root: " << suiteSettings.exportsRoot << "\n\n";
+    text << "Suite VFS root: " << suiteSettings.suiteVfsRoot << "\n\n";
     text << "Use the suite gear button to manage shared settings without rebuilding this app-specific shell.";
     return text;
 }
@@ -218,33 +407,96 @@ void MainComponent::resized()
 {
     headerBar.setBounds(getLocalBounds().removeFromTop(96));
 
-    auto area = getLocalBounds().reduced(34, 28);
-    area.removeFromTop(88);
+    auto area = getLocalBounds();
+    area.removeFromTop(96);
 
-    titleLabel.setBounds(area.removeFromTop(38));
-    subtitleLabel.setBounds(area.removeFromTop(26));
-    runtimeLabel.setBounds(area.removeFromTop(24));
-    area.removeFromTop(16);
+    auto titleArea = area.removeFromTop(60).reduced(34, 4);
+    titleLabel.setBounds(titleArea.removeFromTop(28));
+    subtitleLabel.setBounds(titleArea.removeFromTop(18));
+    runtimeLabel.setBounds(titleArea);
 
-    auto topRow = area.removeFromTop(area.getHeight() / 2);
-    auto leftTop = topRow.removeFromLeft(topRow.getWidth() / 2);
-    leftTop.removeFromRight(8);
-    topRow.removeFromLeft(8);
+    if (menuBar != nullptr)
+        menuBar->setBounds(area.removeFromTop(28));
 
-    workbenchGroup.setBounds(leftTop);
-    resourcesGroup.setBounds(topRow);
-
-    auto bottomRow = area;
-    auto leftBottom = bottomRow.removeFromLeft(bottomRow.getWidth() / 2);
-    leftBottom.removeFromRight(8);
-    bottomRow.removeFromLeft(8);
-
-    aiGroup.setBounds(leftBottom);
-    configGroup.setBounds(bottomRow);
-
-    workbenchSummary.setBounds(workbenchGroup.getBounds().reduced(14, 26));
-    resourcesSummary.setBounds(resourcesGroup.getBounds().reduced(14, 26));
-    aiSummary.setBounds(aiGroup.getBounds().reduced(14, 26));
-    configSummary.setBounds(configGroup.getBounds().reduced(14, 26));
+    if (dockManager != nullptr)
+        dockManager->setBounds(area);
 }
 
+juce::StringArray MainComponent::getMenuBarNames()
+{
+    return { "Panels", "Help" };
+}
+
+juce::PopupMenu MainComponent::getMenuForIndex(int topLevelMenuIndex, const juce::String&)
+{
+    juce::PopupMenu menu;
+
+    if (topLevelMenuIndex == 0)
+    {
+        const auto isOpen = [this](const juce::String& id)
+        {
+            return dockManager != nullptr && dockManager->isPanelOpen(id);
+        };
+
+        menu.addItem(menuIdPanelWorkbench, "Domain Workbench", true, isOpen(panelIdWorkbench));
+        menu.addItem(menuIdPanelResources, "Resources And Registry", true, isOpen(panelIdResources));
+        menu.addItem(menuIdPanelConfig, "Suite Configuration", true, isOpen(panelIdConfig));
+        menu.addItem(menuIdPanelAi, "AI Assistant", true, isOpen(panelIdAi));
+        menu.addSeparator();
+        menu.addItem(menuIdResetLayout, "Reset Dock Layout");
+        return menu;
+    }
+
+    menu.addItem(1, "EULA");
+    return menu;
+}
+
+void MainComponent::menuItemSelected(int menuItemID, int topLevelMenuIndex)
+{
+    if (topLevelMenuIndex == 0)
+    {
+        switch (menuItemID)
+        {
+            case menuIdPanelWorkbench: toggleDockPanel(panelIdWorkbench, CreationDock::DockTargetZone::Left); break;
+            case menuIdPanelResources: toggleDockPanel(panelIdResources, CreationDock::DockTargetZone::Right); break;
+            case menuIdPanelConfig:    toggleDockPanel(panelIdConfig, CreationDock::DockTargetZone::Bottom); break;
+            case menuIdPanelAi:        toggleDockPanel(panelIdAi, CreationDock::DockTargetZone::Right); break;
+            case menuIdResetLayout:    if (dockManager != nullptr) dockManager->resetLayout(); break;
+            default: break;
+        }
+
+        menuItemsChanged();
+        return;
+    }
+
+    if (menuItemID == 1)
+        suiteShellController.showSuiteEula();
+}
+
+void MainComponent::initialiseDockingWorkspace()
+{
+    if (dockManager == nullptr)
+        return;
+
+    dockManager->registerPanel(panelIdWorkbench, "Domain Workbench",
+        std::make_unique<GroupSummaryHost>(workbenchGroup, workbenchSummary), CreationDock::DockTargetZone::Left);
+    dockManager->registerPanel(panelIdResources, "Resources And Registry",
+        std::make_unique<GroupSummaryHost>(resourcesGroup, resourcesSummary), CreationDock::DockTargetZone::CenterTab);
+    dockManager->registerPanel(panelIdConfig, "Suite Configuration",
+        std::make_unique<GroupSummaryHost>(configGroup, configSummary), CreationDock::DockTargetZone::Bottom);
+    dockManager->registerPanel(panelIdAi, "AI Assistant",
+        std::make_unique<NonOwningPanelHost>(aiPanel), CreationDock::DockTargetZone::Right);
+}
+
+void MainComponent::toggleDockPanel(const juce::String& panelId, CreationDock::DockTargetZone fallbackZone)
+{
+    if (dockManager == nullptr)
+        return;
+
+    if (dockManager->isPanelOpen(panelId))
+        dockManager->closePanel(panelId);
+    else
+        dockManager->showPanel(panelId, fallbackZone);
+
+    menuItemsChanged();
+}

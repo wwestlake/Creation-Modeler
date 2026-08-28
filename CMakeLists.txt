@@ -33,6 +33,13 @@ if(EXISTS "${CREATION_SUITE_SHARED_DIR}/AssetSystem/CMakeLists.txt")
     set(CREATION_MODELER_ASSET_SYSTEM_TARGET creation_suite_asset_system)
 endif()
 
+set(CREATION_MODELER_VFS_TARGET "")
+if(EXISTS "${CREATION_SUITE_SHARED_DIR}/VFS/CMakeLists.txt")
+    add_subdirectory("${CREATION_SUITE_SHARED_DIR}/VFS"
+                     "${CMAKE_CURRENT_BINARY_DIR}/CreationSuiteSharedVFS")
+    set(CREATION_MODELER_VFS_TARGET creation_suite_vfs)
+endif()
+
 set(CREATION_MODELER_SERVICES_TARGET "")
 if(EXISTS "${CREATION_SUITE_SHARED_DIR}/Services/CMakeLists.txt")
     add_subdirectory("${CREATION_SUITE_SHARED_DIR}/Services"
@@ -54,13 +61,44 @@ if(EXISTS "${CREATION_SUITE_SHARED_DIR}/Interop/CMakeLists.txt")
     set(CREATION_MODELER_INTEROP_TARGET creation_suite_interop)
 endif()
 
+if(EXISTS "${CREATION_SUITE_SHARED_DIR}/JuceDocking/CMakeLists.txt")
+    add_subdirectory("${CREATION_SUITE_SHARED_DIR}/JuceDocking"
+                     "${CMAKE_CURRENT_BINARY_DIR}/CreationSuiteSharedDocking")
+endif()
+
+# Modeler's CEL surface -- suite-wide language, not a bespoke per-app one.
+# ce_lang_frontend/node_system build with no LLVM dependency; only the
+# JIT half of shared/CEL needs LLVM, and Modeler doesn't link that (yet).
+if(NOT TARGET node_system)
+    add_subdirectory("${CREATION_SUITE_SHARED_DIR}/NodeSystem" CreationSuiteSharedNodeSystem)
+endif()
+if(NOT TARGET ce_lang_frontend)
+    add_subdirectory("${CREATION_SUITE_SHARED_DIR}/CEL" CreationSuiteSharedCel)
+endif()
+
 juce_add_gui_app(CreationModelerApp
     PRODUCT_NAME "Creation Modeler"
     COMPANY_NAME "LagDaemon Software"
     BUNDLE_ID "com.lagdaemon.creationmodeler"
+    ICON_BIG "${CREATION_SUITE_SHARED_DIR}/UI/assets/creation_modeler.png"
+    ICON_SMALL "${CREATION_SUITE_SHARED_DIR}/UI/assets/creation_modeler.png"
+)
+
+# Mirrors the built executable into the workspace-level shared bin
+# directory (D:\CreationSuite-Workspaces\claude-<config>-bin) so it's
+# reachable at a stable path without needing OS symlink privileges.
+# Every suite agent does this for its own repo -- see AGENTS.md.
+add_custom_command(TARGET CreationModelerApp POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory "D:/CreationSuite-Workspaces/claude-$<LOWER_CASE:$<CONFIG>>-bin"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:CreationModelerApp>" "D:/CreationSuite-Workspaces/claude-$<LOWER_CASE:$<CONFIG>>-bin/"
+    COMMENT "Copying CreationModelerApp to the shared claude bin directory"
 )
 
 juce_generate_juce_header(CreationModelerApp)
+
+target_include_directories(CreationModelerApp PRIVATE
+    "${CREATION_SUITE_SHARED_DIR}/JuceDocking/include"
+)
 
 target_sources(CreationModelerApp PRIVATE
     Source/Main.cpp
@@ -84,6 +122,9 @@ target_link_libraries(CreationModelerApp PRIVATE
     ${CREATION_MODELER_UI_TARGET}
     ${CREATION_MODELER_INTEROP_TARGET}
     creation_modeler_language_host
+    ce_lang_frontend
+    node_system
+    CreationDock
     juce::juce_gui_extra
     juce::juce_audio_basics
     juce::juce_audio_devices
@@ -92,4 +133,24 @@ target_link_libraries(CreationModelerApp PRIVATE
     juce::juce_recommended_lto_flags
     juce::juce_recommended_warning_flags
 )
+
+install(TARGETS CreationModelerApp
+    RUNTIME DESTINATION .
+    RESOURCE DESTINATION .
+)
+install(FILES README.md LICENSE DESTINATION .)
+
+set(CPACK_PACKAGE_NAME "Creation Modeler")
+set(CPACK_PACKAGE_VENDOR "LagDaemon Software")
+set(CPACK_PACKAGE_CONTACT "LagDaemon Software")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Creation Modeler")
+set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
+set(CPACK_PACKAGE_FILE_NAME "creation-modeler-${CPACK_PACKAGE_VERSION}-win64")
+set(CPACK_PACKAGE_INSTALL_DIRECTORY "Creation Modeler")
+set(CPACK_GENERATOR "ZIP;WIX")
+set(CPACK_WIX_PROGRAM_MENU_FOLDER "Creation Modeler")
+set(CPACK_PACKAGE_EXECUTABLES "Creation Modeler" "Creation Modeler")
+set(CPACK_CREATE_DESKTOP_LINKS "Creation Modeler")
+
+include(CPack)
 
