@@ -108,7 +108,7 @@ MainComponent::~MainComponent() = default;
 
 void MainComponent::configureHeader()
 {
-    headerBar.setAppTitle("Creation Modeler");
+    headerBar.setAppTitle("Djehuti Modeler");
     headerBar.setLogoImage(creation::ui::getSuiteLogoImage(creation::ui::SuiteLogoId::modeler));
     headerBar.setProjectLabel("Shell: Ready for domain implementation");
     headerBar.setTransportControlsVisible(false);
@@ -125,7 +125,7 @@ void MainComponent::configureHeader()
     };
     suiteShellController.attach(headerBar,
                                 {
-                                    "Creation Modeler",
+                                    "Djehuti Modeler",
                                     creation::assets::SuiteAppDomain::modeler,
                                     creation_modeler::branding::backgroundColour()
                                 },
@@ -146,7 +146,7 @@ void MainComponent::configureHeader()
 
 void MainComponent::configurePanels()
 {
-    titleLabel.setText("Creation Modeler", juce::dontSendNotification);
+    titleLabel.setText("Djehuti Modeler", juce::dontSendNotification);
     titleLabel.setFont(juce::Font(31.0f, juce::Font::bold));
     titleLabel.setColour(juce::Label::textColourId, juce::Colours::white);
     addAndMakeVisible(titleLabel);
