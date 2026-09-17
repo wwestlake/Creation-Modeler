@@ -301,11 +301,6 @@ void MainComponent::loadSuiteState()
     juce::String registryError;
     const auto allProjects = creation::interop::ProjectRegistry::discoverProjects(suiteSettings, registryError);
     totalProjectCount = allProjects.size();
-
-    creation::interop::ProjectQuery domainQuery;
-    domainQuery.appDomain = currentDomain();
-    const auto domainProjects = creation::interop::ProjectRegistry::queryProjects(suiteSettings, domainQuery, registryError);
-    domainProjectCount = domainProjects.size();
     lastRegistryError = registryError;
 
     if (suiteError.isNotEmpty())
@@ -355,8 +350,8 @@ juce::String MainComponent::registrySummaryText() const
 {
     juce::String text;
     text << "App domain: " << domainDisplayName() << "\n";
-    text << "Projects in this domain: " << domainProjectCount << "\n";
-    text << "Projects across all known suite domains: " << totalProjectCount << "\n\n";
+    // Deliberately unfiltered -- projects are not owned by any app domain.
+    text << "Projects in the shared suite registry: " << totalProjectCount << "\n\n";
     text << "This scaffold is already connected to the shared project registry layer.\n";
     text << "Use this panel to confirm the app is seeing the same suite storage model as every other project.\n";
 
@@ -435,7 +430,7 @@ juce::PopupMenu MainComponent::getMenuForIndex(int topLevelMenuIndex, const juce
     {
         const auto isOpen = [this](const juce::String& id)
         {
-            return dockManager != nullptr && dockManager->isPanelOpen(id);
+            return dockManager != nullptr && dockManager->isRegistered(id);
         };
 
         menu.addItem(menuIdPanelWorkbench, "Domain Workbench", true, isOpen(panelIdWorkbench));
@@ -473,19 +468,34 @@ void MainComponent::menuItemSelected(int menuItemID, int topLevelMenuIndex)
         suiteShellController.showSuiteEula();
 }
 
+void MainComponent::registerDockPanel(const juce::String& panelId, CreationDock::DockTargetZone zone)
+{
+    if (dockManager == nullptr)
+        return;
+
+    if (panelId == panelIdWorkbench)
+        dockManager->registerPanel(panelId, "Domain Workbench",
+            std::make_unique<GroupSummaryHost>(workbenchGroup, workbenchSummary), zone);
+    else if (panelId == panelIdResources)
+        dockManager->registerPanel(panelId, "Resources And Registry",
+            std::make_unique<GroupSummaryHost>(resourcesGroup, resourcesSummary), zone);
+    else if (panelId == panelIdConfig)
+        dockManager->registerPanel(panelId, "Suite Configuration",
+            std::make_unique<GroupSummaryHost>(configGroup, configSummary), zone);
+    else if (panelId == panelIdAi)
+        dockManager->registerPanel(panelId, "AI Assistant",
+            std::make_unique<NonOwningPanelHost>(aiPanel), zone);
+}
+
 void MainComponent::initialiseDockingWorkspace()
 {
     if (dockManager == nullptr)
         return;
 
-    dockManager->registerPanel(panelIdWorkbench, "Domain Workbench",
-        std::make_unique<GroupSummaryHost>(workbenchGroup, workbenchSummary), CreationDock::DockTargetZone::Left);
-    dockManager->registerPanel(panelIdResources, "Resources And Registry",
-        std::make_unique<GroupSummaryHost>(resourcesGroup, resourcesSummary), CreationDock::DockTargetZone::CenterTab);
-    dockManager->registerPanel(panelIdConfig, "Suite Configuration",
-        std::make_unique<GroupSummaryHost>(configGroup, configSummary), CreationDock::DockTargetZone::Bottom);
-    dockManager->registerPanel(panelIdAi, "AI Assistant",
-        std::make_unique<NonOwningPanelHost>(aiPanel), CreationDock::DockTargetZone::Right);
+    registerDockPanel(panelIdWorkbench, CreationDock::DockTargetZone::Left);
+    registerDockPanel(panelIdResources, CreationDock::DockTargetZone::CenterTab);
+    registerDockPanel(panelIdConfig, CreationDock::DockTargetZone::Bottom);
+    registerDockPanel(panelIdAi, CreationDock::DockTargetZone::Right);
 }
 
 void MainComponent::toggleDockPanel(const juce::String& panelId, CreationDock::DockTargetZone fallbackZone)
@@ -493,10 +503,10 @@ void MainComponent::toggleDockPanel(const juce::String& panelId, CreationDock::D
     if (dockManager == nullptr)
         return;
 
-    if (dockManager->isPanelOpen(panelId))
-        dockManager->closePanel(panelId);
+    if (dockManager->isRegistered(panelId))
+        dockManager->unregisterPanel(panelId);
     else
-        dockManager->showPanel(panelId, fallbackZone);
+        registerDockPanel(panelId, fallbackZone);
 
     menuItemsChanged();
 }
