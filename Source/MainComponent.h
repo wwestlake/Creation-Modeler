@@ -44,6 +44,11 @@ private:
     juce::PopupMenu getMenuForIndex(int topLevelMenuIndex, const juce::String&) override;
     void menuItemSelected(int menuItemID, int topLevelMenuIndex) override;
     void initialiseDockingWorkspace();
+    // See CreationEngineer's identical fix -- CreationDock's current API has
+    // no separate open/closed state for an already-registered panel, only
+    // registerPanel()/unregisterPanel(). "Toggle" here means unregister if
+    // present, else re-register into the given fallback zone.
+    void registerDockPanel(const juce::String& panelId, CreationDock::DockTargetZone zone);
     void toggleDockPanel(const juce::String& panelId, CreationDock::DockTargetZone fallbackZone);
 
     std::unique_ptr<juce::MenuBarComponent> menuBar;
@@ -76,7 +81,6 @@ private:
     creation::services::SuiteAiResolvedRuntimeSettings resolvedAiSettings;
 
     juce::String lastRegistryError;
-    int domainProjectCount = 0;
     int totalProjectCount = 0;
 
     juce::String pendingAiPrompt;
