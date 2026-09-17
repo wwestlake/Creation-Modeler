@@ -1,6 +1,6 @@
 ﻿cmake_minimum_required(VERSION 3.22)
 
-set(CreationModeler_VERSION "0.0.1" CACHE STRING "Creation Modeler product version")
+set(CreationModeler_VERSION "0.0.1" CACHE STRING "Djehuti Modeler product version")
 project(CreationModeler VERSION ${CreationModeler_VERSION} LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
@@ -18,10 +18,10 @@ if(NOT DEFINED JUCE_DIR)
     message(FATAL_ERROR "Set JUCE_DIR to your JUCE root directory before configuring.")
 endif()
 
-set(CREATION_SUITE_SHARED_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../shared" CACHE PATH "Path to the Creation Suite shared code root")
+set(CREATION_SUITE_SHARED_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../shared" CACHE PATH "Path to the Djehuti Suite shared code root")
 
 include(cmake/CreationSharedLLVM.cmake)
-configure_creation_shared_llvm(CREATION_MODELER "Creation Modeler")
+configure_creation_shared_llvm(CREATION_MODELER "Djehuti Modeler")
 
 add_subdirectory("${JUCE_DIR}" juce)
 add_subdirectory(Language)
@@ -77,7 +77,7 @@ if(NOT TARGET ce_lang_frontend)
 endif()
 
 juce_add_gui_app(CreationModelerApp
-    PRODUCT_NAME "Creation Modeler"
+    PRODUCT_NAME "Djehuti Modeler"
     COMPANY_NAME "LagDaemon Software"
     BUNDLE_ID "com.lagdaemon.creationmodeler"
     ICON_BIG "${CREATION_SUITE_SHARED_DIR}/UI/assets/creation_modeler.png"
@@ -140,17 +140,17 @@ install(TARGETS CreationModelerApp
 )
 install(FILES README.md LICENSE DESTINATION .)
 
-set(CPACK_PACKAGE_NAME "Creation Modeler")
+set(CPACK_PACKAGE_NAME "Djehuti Modeler")
 set(CPACK_PACKAGE_VENDOR "LagDaemon Software")
 set(CPACK_PACKAGE_CONTACT "LagDaemon Software")
-set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Creation Modeler")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Djehuti Modeler")
 set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
-set(CPACK_PACKAGE_FILE_NAME "creation-modeler-${CPACK_PACKAGE_VERSION}-win64")
-set(CPACK_PACKAGE_INSTALL_DIRECTORY "Creation Modeler")
+set(CPACK_PACKAGE_FILE_NAME "djehuti-modeler-${CPACK_PACKAGE_VERSION}-win64")
+set(CPACK_PACKAGE_INSTALL_DIRECTORY "Djehuti Modeler")
 set(CPACK_GENERATOR "ZIP;WIX")
-set(CPACK_WIX_PROGRAM_MENU_FOLDER "Creation Modeler")
-set(CPACK_PACKAGE_EXECUTABLES "Creation Modeler" "Creation Modeler")
-set(CPACK_CREATE_DESKTOP_LINKS "Creation Modeler")
+set(CPACK_WIX_PROGRAM_MENU_FOLDER "Djehuti Modeler")
+set(CPACK_PACKAGE_EXECUTABLES "Djehuti Modeler" "Djehuti Modeler")
+set(CPACK_CREATE_DESKTOP_LINKS "Djehuti Modeler")
 
 include(CPack)
 

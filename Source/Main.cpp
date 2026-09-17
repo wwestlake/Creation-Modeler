@@ -8,7 +8,7 @@ class CreationModelerApplication final : public creation::ui::SuiteJUCEApplicati
 public:
     CreationModelerApplication() : SuiteJUCEApplication(creation::ui::SuiteLogoId::modeler) {}
 
-    const juce::String getApplicationName() override { return "Creation Modeler"; }
+    const juce::String getApplicationName() override { return "Djehuti Modeler"; }
     const juce::String getApplicationVersion() override { return "0.0.1"; }
     bool moreThanOneInstanceAllowed() override { return true; }
 
