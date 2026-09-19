@@ -400,10 +400,10 @@ void MainComponent::paint(juce::Graphics& g)
 
 void MainComponent::resized()
 {
-    headerBar.setBounds(getLocalBounds().removeFromTop(96));
+    headerBar.setBounds(getLocalBounds().removeFromTop(CreationSuiteHeaderBar::preferredHeight));
 
     auto area = getLocalBounds();
-    area.removeFromTop(96);
+    area.removeFromTop(CreationSuiteHeaderBar::preferredHeight);
 
     auto titleArea = area.removeFromTop(60).reduced(34, 4);
     titleLabel.setBounds(titleArea.removeFromTop(28));
