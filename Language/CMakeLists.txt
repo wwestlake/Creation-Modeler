@@ -1,4 +1,4 @@
-﻿add_library(creation_modeler_language_host STATIC
+add_library(creation_modeler_language_host STATIC
     AppLanguagePolicy.cpp
     AppLanguagePolicy.h
 )
@@ -12,3 +12,6 @@ else()
     target_compile_definitions(creation_modeler_language_host PUBLIC CREATION_MODELER_ENABLE_SCRIPTING=0)
 endif()
 
+
+# Auto-generated output name overrides
+set_target_properties(creation_modeler_language_host PROPERTIES OUTPUT_NAME "djehuti_modeler_language_host")
